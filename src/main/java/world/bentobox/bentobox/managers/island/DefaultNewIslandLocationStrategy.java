@@ -83,7 +83,7 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
      */
     protected Result loadLocation(World world, Location loc)
     {
-        CompletableFuture<Result> result = PaperLib.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), true)
+        CompletableFuture<Result> result = PaperLib.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), false)
                 .thenApply(chunk -> isIsland(loc))
                 .exceptionally(ex -> Result.BLOCKS_IN_AREA);
         return result.join();
