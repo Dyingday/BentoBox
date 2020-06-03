@@ -5,7 +5,11 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 
+import io.papermc.lib.features.asyncchunks.AsyncChunks;
+import io.papermc.lib.features.asyncchunks.AsyncChunksSync;
+import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -32,6 +36,8 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
         ISLAND_FOUND, BLOCKS_IN_AREA, FREE
     }
 
+    private final AsyncChunks chunkAsync = new AsyncChunksSync();
+
     protected BentoBox plugin = BentoBox.getInstance();
 
     @Override
@@ -46,11 +52,11 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
         // Find a free spot
         Map<Result, Integer> result = new EnumMap<>(Result.class);
         // Check center
-        Result r = isIsland(last);
+        Result r = loadLocation(world, last);
         while (!r.equals(Result.FREE) && result.getOrDefault(Result.BLOCKS_IN_AREA, 0) < MAX_UNOWNED_ISLANDS) {
             nextGridLocation(last);
             result.put(r, result.getOrDefault(r, 0) + 1);
-            r = isIsland(last);
+            r = loadLocation(world, last);
         }
 
         if (!r.equals(Result.FREE)) {
@@ -64,6 +70,39 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
         }
         plugin.getIslands().setLast(last);
         return last;
+    }
+
+    /**
+     * Loads the chunk with location located inside.
+     * Then it checks the DefaultNewIslandLocationStrategy#isIsland to get Result type
+     * Todo: think about loading all chunks the island inhibits as there may be problems caused when it checks island corners?
+     *
+     * @param world - the world
+     * @param loc - the location
+     * @return Result - BLOCKS_IN_AREA if unable to load chunk, or Result of DefaultNewIslandLocationStrategy#isIsland
+     */
+    protected Result loadLocation(World world, Location loc)
+    {
+        Result r = Result.BLOCKS_IN_AREA; // Todo: is this the result we want to return if we fail to load the chunk?
+        try
+        {
+            chunkAsync.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), true).get();
+            // Waits until chunk has been loaded before proceeding
+            r = isIsland(loc);
+        }
+        catch (InterruptedException e)
+        {
+            plugin.logError("Async interrupted loading chunk at " + loc.toString());
+            e.printStackTrace();
+            plugin.logError("Skipping Island location and moving on");
+        }
+        catch (ExecutionException e)
+        {
+            plugin.logError("Async was exceptionally completed for loading chunk at " + loc.toString());
+            e.printStackTrace();
+            plugin.logError("Skipping Island location and moving on");
+        }
+        return r;
     }
 
     /**
