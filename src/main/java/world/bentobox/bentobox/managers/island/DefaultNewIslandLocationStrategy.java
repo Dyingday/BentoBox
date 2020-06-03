@@ -44,13 +44,13 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
                     plugin.getIWM().getIslandHeight(world),
                     (double) plugin.getIWM().getIslandZOffset(world) + plugin.getIWM().getIslandStartZ(world));
         }
-        while(foundLocation != null)
+        while(foundLocation == null)
         {
             loadLocationAsync(world, last);
             nextGridLocation(last);
         }
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).cancel(true);
-        plugin.getIslands().setLast(last);
+        plugin.getIslands().setLast(foundLocation);
         return last;
     }
 
