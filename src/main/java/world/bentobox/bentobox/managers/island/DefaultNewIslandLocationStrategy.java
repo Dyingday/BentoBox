@@ -5,8 +5,11 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 
+import io.papermc.lib.PaperLib;
 import io.papermc.lib.features.asyncchunks.AsyncChunks;
 import io.papermc.lib.features.asyncchunks.AsyncChunksSync;
 import org.bukkit.Chunk;
@@ -35,8 +38,6 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
     protected enum Result {
         ISLAND_FOUND, BLOCKS_IN_AREA, FREE
     }
-
-    private final AsyncChunks chunkAsync = new AsyncChunksSync();
 
     protected BentoBox plugin = BentoBox.getInstance();
 
@@ -75,7 +76,6 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
     /**
      * Loads the chunk with location located inside.
      * Then it checks the DefaultNewIslandLocationStrategy#isIsland to get Result type
-     * Todo: think about loading all chunks the island inhibits as there may be problems caused when it checks island corners?
      *
      * @param world - the world
      * @param loc - the location
@@ -83,26 +83,10 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
      */
     protected Result loadLocation(World world, Location loc)
     {
-        Result r = Result.BLOCKS_IN_AREA; // Todo: is this the result we want to return if we fail to load the chunk?
-        try
-        {
-            chunkAsync.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), true).get();
-            // Waits until chunk has been loaded before proceeding
-            r = isIsland(loc);
-        }
-        catch (InterruptedException e)
-        {
-            plugin.logError("Async interrupted loading chunk at " + loc.toString());
-            e.printStackTrace();
-            plugin.logError("Skipping Island location and moving on");
-        }
-        catch (ExecutionException e)
-        {
-            plugin.logError("Async was exceptionally completed for loading chunk at " + loc.toString());
-            e.printStackTrace();
-            plugin.logError("Skipping Island location and moving on");
-        }
-        return r;
+        CompletableFuture<Result> result = PaperLib.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), true)
+                .thenApply(chunk -> isIsland(loc))
+                .exceptionally(ex -> Result.BLOCKS_IN_AREA);
+        return result.join();
     }
 
     /**
