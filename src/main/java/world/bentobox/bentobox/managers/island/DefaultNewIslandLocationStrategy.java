@@ -2,8 +2,10 @@ package world.bentobox.bentobox.managers.island;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import io.papermc.lib.PaperLib;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -31,68 +33,41 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
     }
 
     protected BentoBox plugin = BentoBox.getInstance();
-    private final List<CompletableFuture<Result>> futures = new ArrayList<>();
-    private Location foundLocation = null;
-    private final Map<Result, Integer> results = new EnumMap<>(Result.class);
 
     @Override
-    public Location getNextLocation(World world) {
+    public CompletableFuture<Location> getNextLocationAsync(World world)
+    {
+        CompletableFuture<Location> future = new CompletableFuture<>();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> future.complete(loadLocationAsync(world)));
+        return future;
+    }
+
+    protected Location loadLocationAsync(World world) {
         Location last = plugin.getIslands().getLast(world);
-        if (last == null) {
+        if(last == null) {
             last = new Location(world,
                     (double) plugin.getIWM().getIslandXOffset(world) + plugin.getIWM().getIslandStartX(world),
                     plugin.getIWM().getIslandHeight(world),
                     (double) plugin.getIWM().getIslandZOffset(world) + plugin.getIWM().getIslandStartZ(world));
         }
-        while(foundLocation == null)
-        {
-            loadLocationAsync(world, last);
+        Map<Result, Integer> result = new EnumMap<>(Result.class);
+        Result r = isIsland(last);
+        while (!r.equals(Result.FREE) && result.getOrDefault(Result.BLOCKS_IN_AREA, 0) < MAX_UNOWNED_ISLANDS) {
             nextGridLocation(last);
-        }
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).cancel(true);
-        plugin.getIslands().setLast(foundLocation);
-        return last;
-    }
-
-    /**
-     * Loads the chunk asynchronously with location located inside.
-     * Then it checks the DefaultNewIslandLocationStrategy#isIsland to get Result type
-     *
-     * @param world - the world
-     * @param loc - the location
-     */
-    protected void loadLocationAsync(World world, Location loc)
-    {
-        CompletableFuture<Result> future = PaperLib.getChunkAtAsync(world, loc.getChunk().getX(), loc.getChunk().getZ(), false)
-                .thenApply(chunk -> isIsland(loc))
-                .whenComplete((result, ex) -> locationAsyncResult(result, ex, loc));
-        futures.add(future);
-    }
-
-    protected void locationAsyncResult(Result result, Throwable ex, Location loc)
-    {
-        Result r;
-        if(result == null) {
-            r = Result.BLOCKS_IN_AREA;
-        }
-        else {
-            r = result;
-        }
-        if(!r.equals(Result.FREE) && results.getOrDefault(Result.BLOCKS_IN_AREA, 0) < MAX_UNOWNED_ISLANDS) {
-            results.put(r, results.getOrDefault(r, 0) + 1);
-            return;
+            result.put(r, result.getOrDefault(r, 0) + 1);
+            r = isIsland(last);
         }
         if (!r.equals(Result.FREE)) {
             // We could not find a free spot within the limit required. It's likely this
             // world is not empty
             plugin.logError("Could not find a free spot for islands! Is this world empty?");
-            plugin.logError("Blocks around center locations: " + results.getOrDefault(Result.BLOCKS_IN_AREA, 0) + " max "
+            plugin.logError("Blocks around center locations: " + result.getOrDefault(Result.BLOCKS_IN_AREA, 0) + " max "
                     + MAX_UNOWNED_ISLANDS);
-            plugin.logError("Known islands: " + results.getOrDefault(Result.ISLAND_FOUND, 0) + " max unlimited.");
+            plugin.logError("Known islands: " + result.getOrDefault(Result.ISLAND_FOUND, 0) + " max unlimited.");
+            return null;
         }
-        else {
-            foundLocation = loc;
-        }
+        plugin.getIslands().setLast(last);
+        return last;
     }
 
     /**
@@ -122,7 +97,18 @@ public class DefaultNewIslandLocationStrategy implements NewIslandLocationStrate
             if (plugin.getIslands().getIslandAt(l).isPresent() || plugin.getIslandDeletionManager().inDeletion(l)) {
                 return Result.ISLAND_FOUND;
             }
-            if (Util.isChunkGenerated(l)) generated = true;
+            try
+            {
+                if(PaperLib.getChunkAtAsync(location, false).get() != null) generated = true;
+            }
+            catch (InterruptedException e)
+            {
+                plugin.logError("Interrupted whilst trying to load chunk!\n" + e);
+            }
+            catch (ExecutionException e)
+            {
+                plugin.logError("Chunk loading executed exceptionally\n" + e);
+            }
         }
         // If chunk has not been generated yet, then it's not occupied
         if (!generated) {
